@@ -10,11 +10,12 @@ License: Apache 2.0
 Contact: nunezco2@illinois.edu
 """
 import time
-from typing import Union, Optional, List
+from threading import Lock
+from typing import Union, Optional, List, Dict
 
 from .users import UserManager
 from ..model.user import Permissions
-from ..model.tasks import CircuitTask, TestTask, ControlTask, TaskType, TaskBase
+from ..model.tasks import CircuitTask, TestTask, ControlTask, TaskType, TaskBase, TaskStatus
 from ..model.results import CircuitResult, TestResult, ControlAck, TaskResult
 from .queue import QPUTaskQueue, QueueEntry
 from .fsm import QPUAbstraction, QPUEvent, QPUState
@@ -36,8 +37,22 @@ class QPUExecutor:
         self.queue = QPUTaskQueue()
         self.result_store = result_store
         self.users = users
+        self._task_statuses: Dict[str, TaskStatus] = {}
+        self._task_status_lock = Lock()
 
         logger.info("QPUExecutor initialized")
+
+    def set_task_status(self, task_id: str, status: TaskStatus) -> None:
+        """Store the current lifecycle status of a task"""
+        with self._task_status_lock:
+            self._task_statuses[task_id] = status
+
+        logger.info(f"Task {task_id} status updated to {status.value}")
+
+    def get_task_status(self, task_id: str) -> Optional[TaskStatus]:
+        """Return the current lifecycle status of a task"""
+        with self._task_status_lock:
+            return self._task_statuses.get(task_id)
 
     def is_qpu_online(self) -> bool:
         try:
@@ -66,28 +81,40 @@ class QPUExecutor:
             priority=priority
         )
 
+        # Mark the task as queued after it is successfully added to the queue
+        self.set_task_status(task.task_id, TaskStatus.QUEUED)
+
         logger.info(f"Task enqueued: {task.task_id} ({task.type}) by {user}")
 
         if self.qpu.state != QPUState.IDLE:
             logger.warning(f"QPU busy (state: {self.qpu.state}), deferring task {task.task_id}")
             return None
 
-        return self._dispatch(entry)
+        return self._dispatch(entry.task)
 
     def _dispatch(self, task: Union[CircuitTask, TestTask, ControlTask]) -> Optional[Union[CircuitResult, TestResult, ControlAck]]:
-        match task.type:
-            case TaskType.CIRCUIT:
-                result = self._execute_circuit(task)
-            case TaskType.TEST:
-                result = self._execute_test(task)
-            case TaskType.CONTROL:
-                result = self._execute_control(task)
-            case _:
-                logger.error(f"Unknown task type dispatched: {task.type}")
-                raise UnknownQPUTaskType(task.type)
+        self.set_task_status(task.task_id, TaskStatus.RUNNING)
 
-        if self.result_store and result is not None:
-            self.result_store.save(result)
+        try:
+            match task.type:
+                case TaskType.CIRCUIT:
+                    result = self._execute_circuit(task)
+                case TaskType.TEST:
+                    result = self._execute_test(task)
+                case TaskType.CONTROL:
+                    result = self._execute_control(task)
+                case _:
+                    logger.error(f"Unknown task type dispatched: {task.type}")
+                    raise UnknownQPUTaskType(task.type)
+
+            if self.result_store and result is not None:
+                self.result_store.save(result)
+
+        except Exception:
+            self.set_task_status(task.task_id, TaskStatus.FAILED)
+            raise
+
+        self.set_task_status(task.task_id, TaskStatus.COMPLETED)
         self._handle_deferred_tasks()
         return result
 
@@ -119,20 +146,29 @@ class QPUExecutor:
             task: TaskBase = entry.task
             logger.debug(f"Executing task {task.task_id} in context {entry.context_id}")
 
-            match task.type:
-                case TaskType.CIRCUIT:
-                    result = self._execute_circuit(task)
-                case TaskType.TEST:
-                    result = self._execute_test(task)
-                case TaskType.CONTROL:
-                    result = self._execute_control(task)
-                case _:
-                    logger.error(f"Unknown task type in batch: {task.type}")
-                    raise UnknownQPUTaskType(task.type)
+            self.set_task_status(task.task_id, TaskStatus.RUNNING)
 
+            try:
+                match task.type:
+                    case TaskType.CIRCUIT:
+                        result = self._execute_circuit(task)
+                    case TaskType.TEST:
+                        result = self._execute_test(task)
+                    case TaskType.CONTROL:
+                        result = self._execute_control(task)
+                    case _:
+                        logger.error(f"Unknown task type in batch: {task.type}")
+                        raise UnknownQPUTaskType(task.type)
+
+                if self.result_store and result is not None:
+                    self.result_store.save(result)
+
+            except Exception:
+                self.set_task_status(task.task_id, TaskStatus.FAILED)
+                raise
+
+            self.set_task_status(task.task_id, TaskStatus.COMPLETED)
             results.append(result)
-            if self.result_store and result is not None:
-                self.result_store.save(result)
 
         batch_elapsed = time.monotonic() - batch_start
         logger.info(

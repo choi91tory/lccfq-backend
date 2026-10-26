@@ -18,15 +18,30 @@ from lccfq_backend.api.protobufs_compiled.qpu_service_pb2 import (
     CircuitResultPayload,
     TestResultPayload,
     ControlAckPayload,
+    GetTaskStatusRequest,
+    GetTaskStatusResponse,
+    TASK_STATUS_QUEUED,
+    TASK_STATUS_RUNNING,
+    TASK_STATUS_COMPLETED,
+    TASK_STATUS_FAILED,
+    TASK_STATUS_CANCELLED,
 )
 from lccfq_backend.backend.executor import QPUExecutor
 from lccfq_backend.backend.result_store import ResultStore
-from lccfq_backend.model.tasks import CircuitTask, TestTask, Gate
+from lccfq_backend.model.tasks import CircuitTask, TestTask, Gate, TaskStatus
 from lccfq_backend.model.results import CircuitResult, TestResult, ControlAck
 from lccfq_backend.backend.error import UnknownQPUTaskType
 from lccfq_backend.utils.log import setup_logger
 
 logger = setup_logger("ExecutorService")
+
+_TASK_STATUS_TO_PROTO = {
+    TaskStatus.QUEUED: TASK_STATUS_QUEUED,
+    TaskStatus.RUNNING: TASK_STATUS_RUNNING,
+    TaskStatus.COMPLETED: TASK_STATUS_COMPLETED,
+    TaskStatus.FAILED: TASK_STATUS_FAILED,
+    TaskStatus.CANCELLED: TASK_STATUS_CANCELLED,
+}
 
 
 class ExecutorService(QPUExecutorServicer):
@@ -120,6 +135,12 @@ class ExecutorService(QPUExecutorServicer):
                 priority=0
             )
 
+            # Mark the task as queued after it is successfully added to the queue
+            self.executor.set_task_status(
+                circuit_task.task_id,
+                TaskStatus.QUEUED
+            )
+
             logger.info(f"Circuit task enqueued: {circuit_task.task_id} for user {user_id}")
 
             return SubmitCircuitTaskResponse(
@@ -198,6 +219,12 @@ class ExecutorService(QPUExecutorServicer):
                 user=user_id,
                 context_id=None,
                 priority=0
+            )
+
+            # Mark the task as queued after it is successfully added to the queue
+            self.executor.set_task_status(
+                test_task.task_id,
+                TaskStatus.QUEUED
             )
 
             logger.info(f"Test task enqueued: {test_task.task_id} for user {user_id}")
@@ -280,6 +307,45 @@ class ExecutorService(QPUExecutorServicer):
         logger.error(f"Unexpected result type for task {task_id}: {type(result)}")
         return GetResultResponse(found=False, error_message="Unexpected result type")
 
+    def GetTaskStatus(
+        self,
+        request: GetTaskStatusRequest,
+        context: grpc.ServicerContext,
+    ) -> GetTaskStatusResponse:
+        """
+        Retrieve the current lifecycle status of a task.
+
+        Args:
+            request: GetTaskStatusRequest with task_id
+            context: gRPC service context
+
+        Returns:
+            GetTaskStatusResponse with the current status, or found=False
+        """
+        task_id = request.task_id.strip()
+        logger.info(f"GetTaskStatus request for task_id={task_id}")
+
+        if not task_id:
+            context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
+            context.set_details("Task ID cannot be empty")
+            return GetTaskStatusResponse(
+                found=False,
+                error_message="Task ID cannot be empty",
+            )
+
+        status = self.executor.get_task_status(task_id)
+
+        if status is None:
+            return GetTaskStatusResponse(
+                found=False,
+                error_message=f"No status for task {task_id}",
+            )
+
+        return GetTaskStatusResponse(
+            found=True,
+            status=_TASK_STATUS_TO_PROTO[status],
+        )
+
     def _extract_user_from_context(self, context: grpc.ServicerContext) -> str:
         """
         Extract user ID from the client's mTLS certificate.
@@ -314,7 +380,7 @@ class ExecutorService(QPUExecutorServicer):
                     break
 
         if not user_id:
-            logger.error(f"No client certificate CN found in auth context")
+            logger.error("No client certificate CN found in auth context")
             raise ValueError("Client certificate missing or invalid")
 
         logger.debug(f"Extracted user_id from certificate: {user_id}")

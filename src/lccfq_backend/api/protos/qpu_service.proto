@@ -80,9 +80,32 @@ message GetResultResponse {
   }
 }
 
+// Task lifecycle states
+enum TaskStatusValue {
+  TASK_STATUS_UNSPECIFIED = 0;
+  TASK_STATUS_QUEUED = 1;
+  TASK_STATUS_RUNNING = 2;
+  TASK_STATUS_COMPLETED = 3;
+  TASK_STATUS_FAILED = 4;
+  TASK_STATUS_CANCELLED = 5;
+}
+
+// Request to retrieve a task status by task ID
+message GetTaskStatusRequest {
+  string task_id = 1;
+}
+
+// Response containing the current task status
+message GetTaskStatusResponse {
+  bool found = 1;
+  TaskStatusValue status = 2;
+  string error_message = 3;
+}
+
 service QPUExecutor {
   rpc Ping(ExecutorRequest) returns (ExecutorResponse);
   rpc SubmitCircuitTask(SubmitCircuitTaskRequest) returns (SubmitCircuitTaskResponse);
   rpc SubmitTestTask(SubmitTestTaskRequest) returns (SubmitTestTaskResponse);
   rpc GetResult(GetResultRequest) returns (GetResultResponse);
+  rpc GetTaskStatus(GetTaskStatusRequest) returns (GetTaskStatusResponse);
 }

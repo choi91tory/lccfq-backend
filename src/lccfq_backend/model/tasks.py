@@ -27,6 +27,16 @@ class TaskType(str, Enum):
     CONTROL = "control"
 
 
+class TaskStatus(str, Enum):
+    """Lifecycle states for individual tasks
+    """
+    QUEUED = "queued"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
 def generate_task_id() -> str:
     """Generate a unique task id
 
