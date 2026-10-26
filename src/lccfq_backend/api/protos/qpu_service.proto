@@ -102,10 +102,23 @@ message GetTaskStatusResponse {
   string error_message = 3;
 }
 
+// Request to cancel a task by task ID
+message CancelTaskRequest {
+  string task_id = 1;
+}
+
+// Response indicating whether the task was cancelled
+message CancelTaskResponse {
+  bool found = 1;
+  bool cancelled = 2;
+  string error_message = 3;
+}
+
 service QPUExecutor {
   rpc Ping(ExecutorRequest) returns (ExecutorResponse);
   rpc SubmitCircuitTask(SubmitCircuitTaskRequest) returns (SubmitCircuitTaskResponse);
   rpc SubmitTestTask(SubmitTestTaskRequest) returns (SubmitTestTaskResponse);
   rpc GetResult(GetResultRequest) returns (GetResultResponse);
   rpc GetTaskStatus(GetTaskStatusRequest) returns (GetTaskStatusResponse);
+  rpc CancelTask(CancelTaskRequest) returns (CancelTaskResponse);
 }

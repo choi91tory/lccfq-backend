@@ -25,6 +25,8 @@ from lccfq_backend.api.protobufs_compiled.qpu_service_pb2 import (
     TASK_STATUS_COMPLETED,
     TASK_STATUS_FAILED,
     TASK_STATUS_CANCELLED,
+    CancelTaskRequest,
+    CancelTaskResponse,
 )
 from lccfq_backend.backend.executor import QPUExecutor
 from lccfq_backend.backend.result_store import ResultStore
@@ -344,6 +346,59 @@ class ExecutorService(QPUExecutorServicer):
         return GetTaskStatusResponse(
             found=True,
             status=_TASK_STATUS_TO_PROTO[status],
+        )
+
+    def CancelTask(
+        self,
+        request: CancelTaskRequest,
+        context: grpc.ServicerContext,
+    ) -> CancelTaskResponse:
+        """
+        Cancel a queued task by task ID.
+        """
+        task_id = request.task_id.strip()
+        logger.info(f"CancelTask request for task_id={task_id}")
+
+        if not task_id:
+            context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
+            context.set_details("Task ID cannot be empty")
+            return CancelTaskResponse(
+                found=False,
+                cancelled=False,
+                error_message="Task ID cannot be empty",
+            )
+
+        status = self.executor.get_task_status(task_id)
+
+        if status is None:
+            return CancelTaskResponse(
+                found=False,
+                cancelled=False,
+                error_message=f"No status for task {task_id}",
+            )
+
+        if status != TaskStatus.QUEUED:
+            return CancelTaskResponse(
+                found=True,
+                cancelled=False,
+                error_message=(
+                    f"Task {task_id} cannot be cancelled "
+                    f"from status {status.value}"
+                ),
+            )
+
+        cancelled = self.executor.cancel_task(task_id)
+
+        if not cancelled:
+            return CancelTaskResponse(
+                found=True,
+                cancelled=False,
+                error_message=f"Task {task_id} could not be cancelled",
+            )
+
+        return CancelTaskResponse(
+            found=True,
+            cancelled=True,
         )
 
     def _extract_user_from_context(self, context: grpc.ServicerContext) -> str:

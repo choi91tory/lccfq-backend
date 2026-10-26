@@ -54,6 +54,25 @@ class QPUExecutor:
         with self._task_status_lock:
             return self._task_statuses.get(task_id)
 
+    def cancel_task(self, task_id: str) -> bool:
+        """Cancel a queued task"""
+
+        with self._task_status_lock:
+            status = self._task_statuses.get(task_id)
+
+            if status != TaskStatus.QUEUED:
+                return False
+
+            removed = self.queue.remove(task_id)
+
+            if not removed:
+                return False
+
+            self._task_statuses[task_id] = TaskStatus.CANCELLED
+
+        logger.info(f"Task {task_id} cancelled")
+        return True
+
     def is_qpu_online(self) -> bool:
         try:
             with open("/tmp/qpu_status.flag", "r") as f:

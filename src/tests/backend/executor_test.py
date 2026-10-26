@@ -148,3 +148,35 @@ def test_batched_context_updates_task_status_to_completed():
 
     assert len(results) == 1
     assert executor.get_task_status(task.task_id) == TaskStatus.COMPLETED
+
+def test_cancel_task_removes_queued_task():
+    executor = QPUExecutor(
+        config=_config,
+        users=UserManager(),
+    )
+
+    task = TestTask(
+        task_id="task-to-cancel",
+        type=TaskType.TEST,
+        symbol="xeb",
+        params=[1, 2, 3],
+        shots=10,
+    )
+
+    executor.execute(task, user="alice")
+
+    assert executor.get_task_status(task.task_id) == TaskStatus.QUEUED
+    assert executor.cancel_task(task.task_id) is True
+    assert executor.get_task_status(task.task_id) == TaskStatus.CANCELLED
+    assert executor.queue.list_pending() == []
+
+
+def test_cancel_task_rejects_running_task():
+    executor = QPUExecutor(
+        config=_config,
+        users=UserManager(),
+    )
+    executor.set_task_status("running-task", TaskStatus.RUNNING)
+
+    assert executor.cancel_task("running-task") is False
+    assert executor.get_task_status("running-task") == TaskStatus.RUNNING
