@@ -1,12 +1,14 @@
 from unittest.mock import Mock
 
 import grpc
+import json
 
 from lccfq_backend.api.protobufs_compiled.qpu_service_pb2 import (
     GetTaskStatusRequest,
     TASK_STATUS_RUNNING,
     TASK_STATUS_UNSPECIFIED,
     CancelTaskRequest,
+    GetTargetRequest,
 )
 from lccfq_backend.api.services.executor_service import ExecutorService
 from lccfq_backend.backend.executor import QPUExecutor
@@ -136,3 +138,39 @@ def test_cancel_task_rejects_empty_task_id():
     assert response.error_message == "Task ID cannot be empty"
     context.set_code.assert_called_once_with(grpc.StatusCode.INVALID_ARGUMENT)
     context.set_details.assert_called_once_with("Task ID cannot be empty")
+
+def test_get_target_returns_qpu_observables():
+    service = make_service()
+
+    response = service.GetTarget(
+        GetTargetRequest(),
+        Mock(),
+    )
+
+    assert response.success is True
+    assert response.error_message == ""
+
+    target = json.loads(response.target_json)
+
+    assert "qubits" in target
+    assert "last_updated" in target
+    assert target["qubits"]
+
+
+def test_get_target_returns_error_when_hwman_fails():
+    service = make_service()
+    service.executor.hwman.get_observables = Mock(
+        side_effect=RuntimeError("HWMan observables unavailable")
+    )
+    context = Mock()
+
+    response = service.GetTarget(
+        GetTargetRequest(),
+        context,
+    )
+
+    assert response.success is False
+    assert response.target_json == ""
+    assert response.error_message == "HWMan observables unavailable"
+    context.set_code.assert_called_once_with(grpc.StatusCode.INTERNAL)
+    context.set_details.assert_called_once_with("Failed to retrieve QPU target")

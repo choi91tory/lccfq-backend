@@ -27,6 +27,8 @@ from lccfq_backend.api.protobufs_compiled.qpu_service_pb2 import (
     TASK_STATUS_CANCELLED,
     CancelTaskRequest,
     CancelTaskResponse,
+    GetTargetRequest,
+    GetTargetResponse,
 )
 from lccfq_backend.backend.executor import QPUExecutor
 from lccfq_backend.backend.result_store import ResultStore
@@ -400,6 +402,34 @@ class ExecutorService(QPUExecutorServicer):
             found=True,
             cancelled=True,
         )
+
+    def GetTarget(
+        self,
+        request: GetTargetRequest,
+        context: grpc.ServicerContext,
+    ) -> GetTargetResponse:
+        """
+        Retrieve the current QPU target information.
+        """
+        logger.info("GetTarget request received")
+
+        try:
+            observables = self.executor.hwman.get_observables()
+
+            return GetTargetResponse(
+                success=True,
+                target_json=observables.model_dump_json(),
+            )
+
+        except Exception as e:
+            logger.error(f"Error retrieving QPU target: {e}", exc_info=True)
+            context.set_code(grpc.StatusCode.INTERNAL)
+            context.set_details("Failed to retrieve QPU target")
+
+            return GetTargetResponse(
+                success=False,
+                error_message=str(e),
+            )
 
     def _extract_user_from_context(self, context: grpc.ServicerContext) -> str:
         """

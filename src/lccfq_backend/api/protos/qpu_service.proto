@@ -114,6 +114,16 @@ message CancelTaskResponse {
   string error_message = 3;
 }
 
+// Request to retrieve the current QPU target information
+message GetTargetRequest {}
+
+// Response containing serialized QPU target information
+message GetTargetResponse {
+  bool success = 1;
+  string target_json = 2;
+  string error_message = 3;
+}
+
 service QPUExecutor {
   rpc Ping(ExecutorRequest) returns (ExecutorResponse);
   rpc SubmitCircuitTask(SubmitCircuitTaskRequest) returns (SubmitCircuitTaskResponse);
@@ -121,4 +131,5 @@ service QPUExecutor {
   rpc GetResult(GetResultRequest) returns (GetResultResponse);
   rpc GetTaskStatus(GetTaskStatusRequest) returns (GetTaskStatusResponse);
   rpc CancelTask(CancelTaskRequest) returns (CancelTaskResponse);
+  rpc GetTarget(GetTargetRequest) returns (GetTargetResponse);
 }
