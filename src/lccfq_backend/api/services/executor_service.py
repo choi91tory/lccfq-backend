@@ -29,6 +29,8 @@ from lccfq_backend.api.protobufs_compiled.qpu_service_pb2 import (
     CancelTaskResponse,
     GetTargetRequest,
     GetTargetResponse,
+    GetTaskLogsRequest,
+    GetTaskLogsResponse,
 )
 from lccfq_backend.backend.executor import QPUExecutor
 from lccfq_backend.backend.result_store import ResultStore
@@ -430,6 +432,39 @@ class ExecutorService(QPUExecutorServicer):
                 success=False,
                 error_message=str(e),
             )
+
+    def GetTaskLogs(
+        self,
+        request: GetTaskLogsRequest,
+        context: grpc.ServicerContext,
+    ) -> GetTaskLogsResponse:
+        """
+        Retrieve lifecycle log messages for a task.
+        """
+        task_id = request.task_id.strip()
+        logger.info(f"GetTaskLogs request for task_id={task_id}")
+
+        if not task_id:
+            context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
+            context.set_details("Task ID cannot be empty")
+
+            return GetTaskLogsResponse(
+                found=False,
+                error_message="Task ID cannot be empty",
+            )
+
+        logs = self.executor.get_task_logs(task_id)
+
+        if logs is None:
+            return GetTaskLogsResponse(
+                found=False,
+                error_message=f"No logs for task {task_id}",
+            )
+
+        return GetTaskLogsResponse(
+            found=True,
+            logs=logs,
+        )
 
     def _extract_user_from_context(self, context: grpc.ServicerContext) -> str:
         """

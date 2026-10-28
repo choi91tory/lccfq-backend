@@ -39,6 +39,8 @@ class QPUExecutor:
         self.users = users
         self._task_statuses: Dict[str, TaskStatus] = {}
         self._task_status_lock = Lock()
+        self._task_logs: Dict[str, List[str]] = {}
+        self._task_logs_lock = Lock()
 
         logger.info("QPUExecutor initialized")
 
@@ -47,12 +49,28 @@ class QPUExecutor:
         with self._task_status_lock:
             self._task_statuses[task_id] = status
 
+        self.append_task_log(
+            task_id,
+            f"Task status changed to {status.value}",
+        )
+
         logger.info(f"Task {task_id} status updated to {status.value}")
 
     def get_task_status(self, task_id: str) -> Optional[TaskStatus]:
         """Return the current lifecycle status of a task"""
         with self._task_status_lock:
             return self._task_statuses.get(task_id)
+
+    def append_task_log(self, task_id: str, message: str) -> None:
+        """Append a lifecycle log message for a task."""
+        with self._task_logs_lock:
+            self._task_logs.setdefault(task_id, []).append(message)
+
+    def get_task_logs(self, task_id: str) -> Optional[List[str]]:
+        """Return a copy of the lifecycle log messages for a task."""
+        with self._task_logs_lock:
+            logs = self._task_logs.get(task_id)
+            return list(logs) if logs is not None else None
 
     def cancel_task(self, task_id: str) -> bool:
         """Cancel a queued task"""
@@ -69,6 +87,11 @@ class QPUExecutor:
                 return False
 
             self._task_statuses[task_id] = TaskStatus.CANCELLED
+
+        self.append_task_log(
+            task_id,
+            f"Task status changed to {TaskStatus.CANCELLED.value}",
+        )
 
         logger.info(f"Task {task_id} cancelled")
         return True

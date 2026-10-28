@@ -9,6 +9,7 @@ from lccfq_backend.api.protobufs_compiled.qpu_service_pb2 import (
     TASK_STATUS_UNSPECIFIED,
     CancelTaskRequest,
     GetTargetRequest,
+    GetTaskLogsRequest
 )
 from lccfq_backend.api.services.executor_service import ExecutorService
 from lccfq_backend.backend.executor import QPUExecutor
@@ -174,3 +175,53 @@ def test_get_target_returns_error_when_hwman_fails():
     assert response.error_message == "HWMan observables unavailable"
     context.set_code.assert_called_once_with(grpc.StatusCode.INTERNAL)
     context.set_details.assert_called_once_with("Failed to retrieve QPU target")
+
+def test_get_task_logs_returns_stored_logs():
+    service = make_service()
+    task_id = "task-with-logs"
+
+    service.executor.set_task_status(task_id, TaskStatus.QUEUED)
+    service.executor.set_task_status(task_id, TaskStatus.RUNNING)
+    service.executor.set_task_status(task_id, TaskStatus.COMPLETED)
+
+    response = service.GetTaskLogs(
+        GetTaskLogsRequest(task_id=task_id),
+        Mock(),
+    )
+
+    assert response.found is True
+    assert list(response.logs) == [
+        "Task status changed to queued",
+        "Task status changed to running",
+        "Task status changed to completed",
+    ]
+    assert response.error_message == ""
+
+
+def test_get_task_logs_returns_not_found_for_unknown_task():
+    service = make_service()
+
+    response = service.GetTaskLogs(
+        GetTaskLogsRequest(task_id="unknown-task"),
+        Mock(),
+    )
+
+    assert response.found is False
+    assert list(response.logs) == []
+    assert response.error_message == "No logs for task unknown-task"
+
+
+def test_get_task_logs_rejects_empty_task_id():
+    service = make_service()
+    context = Mock()
+
+    response = service.GetTaskLogs(
+        GetTaskLogsRequest(task_id="  "),
+        context,
+    )
+
+    assert response.found is False
+    assert list(response.logs) == []
+    assert response.error_message == "Task ID cannot be empty"
+    context.set_code.assert_called_once_with(grpc.StatusCode.INVALID_ARGUMENT)
+    context.set_details.assert_called_once_with("Task ID cannot be empty")

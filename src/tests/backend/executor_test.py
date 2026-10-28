@@ -120,6 +120,25 @@ def test_dispatch_updates_task_status_to_failed(monkeypatch):
 
     assert executor.get_task_status(task.task_id) == TaskStatus.FAILED
 
+def test_task_logs_record_status_transitions():
+    executor = QPUExecutor(
+        config=_config,
+        users=UserManager(),
+    )
+
+    task_id = "task-with-logs"
+
+    executor.set_task_status(task_id, TaskStatus.QUEUED)
+    executor.set_task_status(task_id, TaskStatus.RUNNING)
+    executor.set_task_status(task_id, TaskStatus.COMPLETED)
+
+    assert executor.get_task_logs(task_id) == [
+        "Task status changed to queued",
+        "Task status changed to running",
+        "Task status changed to completed",
+    ]
+    assert executor.get_task_logs("unknown-task") is None
+
 
 def test_batched_context_updates_task_status_to_completed():
     executor = QPUExecutor(
@@ -169,6 +188,10 @@ def test_cancel_task_removes_queued_task():
     assert executor.cancel_task(task.task_id) is True
     assert executor.get_task_status(task.task_id) == TaskStatus.CANCELLED
     assert executor.queue.list_pending() == []
+    assert executor.get_task_logs(task.task_id) == [
+        "Task status changed to queued",
+        "Task status changed to cancelled",
+    ]
 
 
 def test_cancel_task_rejects_running_task():
